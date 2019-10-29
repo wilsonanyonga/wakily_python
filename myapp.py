@@ -113,7 +113,8 @@ def login():
     # Identity can be any data that is json serializable
     access_token = create_access_token(identity=username)
     # return jsonify(access_token=access_token), 200
-    return jsonify({"token": access_token}), 200
+    return jsonify({"token": access_token,
+                    "code": 200}), 200
 
 
 # Protect a view with jwt_required, which requires a valid access token
@@ -190,21 +191,27 @@ def add_product():
     db.session.add(new_product)
     db.session.commit()
 
-    return product_schema.jsonify(new_product)
+    result = product_schema.dump(new_product)
+    return jsonify({"data":result.data,
+                    "code": 200})
 
 # get all products
 @app.route('/product', methods=['GET'])
 def get_products():
     all_products = Product.query.all()
     result = products_schema.dump(all_products)
-    return jsonify(result.data)
+    return jsonify({"data":result.data,
+                    "code": 200})
+    # return products_schema.jsonify(all_products)
 
 # get single products
 @app.route('/product/<id>', methods=['GET'])
 def get_product(id):
     product = Product.query.get(id)
     
-    return product_schema.jsonify(product)
+    result = product_schema.dump(product)
+    return jsonify({"data":result.data,
+                    "code": 200})
 
 # update a product
 @app.route('/product/<id>', methods=['PUT'])
