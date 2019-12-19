@@ -5,8 +5,8 @@ import os
 import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import (
-    JWTManager, jwt_required, create_access_token,
-    get_jwt_identity
+    JWTManager, jwt_required, create_access_token, get_jwt_identity, create_refresh_token,
+    jwt_refresh_token_required, get_raw_jwt
 )
 import pymysql
 # import importlib
@@ -53,15 +53,17 @@ class NewUser(db.Model):
     id = db.Column(db.Integer, primary_key = True)
     public_id = db.Column(db.String(50), unique = True)
     name = db.Column(db.String(50))
+    email = db.Column(db.String(50))
     password = db.Column(db.String(80))
-    admin = db.Column(db.Boolean)
+    role = db.Column(db.String(50))
     
 
-    def __init__(self, public_id, name, password, admin):
+    def __init__(self, public_id, name, email, password, role):
         self.public_id = public_id
         self.name = name
+        self.email = email
         self.password = password
-        self.admin = admin
+        self.role = role
         
 
 class Todo(db.Model):
@@ -84,12 +86,13 @@ class ProductSchema(ma.Schema):
 
 class UserSchema(ma.Schema):
     class Meta:
-        fields = ('name', 'public_id', 'password', 'admin')
+        fields = ('name', 'email', 'public_id', 'password', 'role')
 
 # init schema
 product_schema = ProductSchema(strict=True)
-user_schema = UserSchema(many=True, strict=True)
 products_schema = ProductSchema(many=True, strict=True)
+user_schema = UserSchema(strict=True)
+users_schema = UserSchema(many=True, strict=True)
 
 # Provide a method to create access tokens. The create_access_token()
 # function is used to actually generate the token, and you can return
@@ -100,20 +103,43 @@ def login():
         return jsonify({"msg": "Missing JSON in request"}), 400
 
     # username = request.json.get('username', None)
-    username = request.json['username']
+    # username = request.json['username']
+    email = request.json['email']
     password = request.json.get('password', None)
-    if not username:
-        return jsonify({"msg": "Missing username parameter"}), 400
+    if not email:
+        # return jsonify({"msg": "Missing username parameter"}), 400
+        return jsonify({"code": 5000}), 400
     if not password:
-        return jsonify({"msg": "Missing password parameter"}), 400
-
-    if username != 'test' or password != 'test':
-        return jsonify({"msg": "Bad username or password"}), 401
+        # return jsonify({"msg": "Missing password parameter"}), 400
+        return jsonify({"code": 5000}), 400
+    
+    emailTest = NewUser.query.filter_by(email=email).first()
+    
+    if emailTest is None:
+        return jsonify({"code": 5000}), 400
+    
+    is_valid = check_password_hash(emailTest.password, password)
+    if not is_valid:
+        return jsonify({"code": 5000}), 400
+    
+    # if username != 'test' or password != 'test':
+    #     return jsonify({"msg": "Bad username or password"}), 401
 
     # Identity can be any data that is json serializable
-    access_token = create_access_token(identity=username)
+    access_token = create_access_token(identity=emailTest.id)
     # return jsonify(access_token=access_token), 200
     return jsonify({"token": access_token,
+                    "code": 200,
+                    "token ident": emailTest.id}), 200
+
+
+# Endpoint for revoking the current users access token
+@app.route('/logout', methods=['POST'])
+@jwt_required
+def logout():
+    jti = get_raw_jwt()['jti']
+    blacklist.add(jti)
+    return jsonify({"msg": "Successfully logged out",
                     "code": 200}), 200
 
 
@@ -158,17 +184,20 @@ def create_user():
 
     name = request.json['name']
     password = generate_password_hash(request.json['password'], method='sha256')
-    
+    email = request.json['email']
     public_id = str(uuid.uuid4())
-    admin = False
+    role = request.json['role']
     
 
-    new_user = NewUser(public_id, name, password, admin)
+    new_user = NewUser(public_id, name, email, password, role)
 
     db.session.add(new_user)
     db.session.commit()
     # return jsonify({'message':'new user created'})
-    return user_schema.jsonify(new_user)
+    # return user_schema.jsonify(new_user)
+    result = user_schema.dump(new_user)
+    return jsonify({"data":result.data,
+                    "code": 200})
     # return (new_user)
 
 @app.route('/user/<user_id>', methods=['PUT'])
