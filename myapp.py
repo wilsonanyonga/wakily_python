@@ -21,9 +21,16 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'db
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost:3306/wakily'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# config for loging out
+app.config['JWT_BLACKLIST_ENABLED'] = True
+app.config['JWT_BLACKLIST_TOKEN_CHECKS'] = ['access', 'refresh']
+
 # Setup the Flask-JWT-Extended extension
 app.config['JWT_SECRET_KEY'] = 'super-secret'  # Change this!
 jwt = JWTManager(app)
+
+# this is for logout function
+blacklist = set()
 
 # Init db
 db = SQLAlchemy(app)
@@ -76,6 +83,38 @@ class Todo(db.Model):
         self.text = text
         self.complete = complete
         self.user_id = user_id
+        
+class Users(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    name = db.Column(db.String(50))
+    email = db.Column(db.String(50))
+    password = db.Column(db.String(50))
+    roles = db.Column(db.String(50))
+
+    def __init__(self, name, email, password, roles):
+        self.name = name
+        self.email = email
+        self.password = password
+        self.roles = roles
+        
+class Student_details(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    name = db.Column(db.String(50))
+    school_code = db.Column(db.String(50))
+    student_code = db.Column(db.String(50))
+    email = db.Column(db.String(50))
+    password = db.Column(db.String(50))
+    roles = db.Column(db.String(50))
+    image = db.Column(db.String(50))
+
+    def __init__(self, name, school_code, student_code, email, password, roles, image):
+        self.name = name
+        self.school_code = school_code
+        self.student_code = student_code
+        self.email = email
+        self.password = password
+        self.roles = roles
+        self.image = image
 
 # from routes import *
 
@@ -87,6 +126,14 @@ class ProductSchema(ma.Schema):
 class UserSchema(ma.Schema):
     class Meta:
         fields = ('name', 'email', 'public_id', 'password', 'role')
+        
+class Test_UserSchema(ma.Schema):
+    class Meta:
+        fields = ('id','name', 'email', 'password', 'roles')
+
+class StudentSchema(ma.Schema):
+    class Meta:
+        fields = ('name', 'school_code', 'student_code', 'email', 'password', 'roles', 'image')
 
 # init schema
 product_schema = ProductSchema(strict=True)
@@ -94,10 +141,22 @@ products_schema = ProductSchema(many=True, strict=True)
 user_schema = UserSchema(strict=True)
 users_schema = UserSchema(many=True, strict=True)
 
+test_user_schema = Test_UserSchema(strict=True)
+test_users_schema = Test_UserSchema(many=True, strict=True)
+
+student_schema = StudentSchema(strict=True)
+students_schema = StudentSchema(many=True, strict=True)
+
+# this is a function for logout blacklist
+@jwt.token_in_blacklist_loader
+def check_if_token_in_blacklist(decrypted_token):
+    jti = decrypted_token['jti']
+    return jti in blacklist
+
 # Provide a method to create access tokens. The create_access_token()
 # function is used to actually generate the token, and you can return
 # it to the caller however you choose.
-@app.route('/login', methods=['POST'])
+@app.route('/api/login', methods=['POST'])
 def login():
     if not request.is_json:
         return jsonify({"msg": "Missing JSON in request"}), 400
@@ -113,14 +172,14 @@ def login():
         # return jsonify({"msg": "Missing password parameter"}), 400
         return jsonify({"code": 5000}), 400
     
-    emailTest = NewUser.query.filter_by(email=email).first()
+    emailTest = Users.query.filter_by(email=email).first()
     
     if emailTest is None:
         return jsonify({"code": 5000}), 400
     
     is_valid = check_password_hash(emailTest.password, password)
     if not is_valid:
-        return jsonify({"code": 5000}), 400
+        return jsonify({"code": 5000}), 401
     
     # if username != 'test' or password != 'test':
     #     return jsonify({"msg": "Bad username or password"}), 401
@@ -134,7 +193,7 @@ def login():
 
 
 # Endpoint for revoking the current users access token
-@app.route('/logout', methods=['POST'])
+@app.route('/api/logout', methods=['POST'])
 @jwt_required
 def logout():
     jti = get_raw_jwt()['jti']
@@ -204,9 +263,9 @@ def create_user():
 def promote_user():
     return ''
 
-@app.route('/user/<user_id>', methods=['DELETE'])
-def delete_user():
-    return ''
+# @app.route('/user/<user_id>', methods=['DELETE'])
+# def delete_user():
+#     return ''
 
 @app.route('/product', methods=['POST'])
 def add_product():
@@ -274,7 +333,107 @@ def delete_product(id):
     except Exception as e:
         return jsonify({'error' : "there is an error"})
         # str(e)
+
+# ---------------------------------------------------------------------------------------------------
+# ------------new code for the previous lumen installation-------------------------------------------
+# ---------------------------------------------------------------------------------------------------
+
+# get all products
+@app.route('/api/listAll', methods=['GET'])
+@jwt_required
+def get_users():
+    all_products = Users.query.all()
+    result = test_users_schema.dump(all_products)
+    return jsonify({"data":result.data,
+                    "code": 200})
+    # return products_schema.jsonify(all_products)
+
+# get single product
+@app.route('/api/list/<id>', methods=['GET'])
+@jwt_required
+def get_user(id):
+    product = Users.query.get(id)
     
+    result = test_user_schema.dump(product)
+    return jsonify({"data":result.data,
+                    "code": 200})
+    
+# getting current users data
+@app.route('/api/list', methods=['GET'])
+@jwt_required
+def get_individual():
+    id = get_jwt_identity()
+    product = Users.query.get(id)
+    
+    result = test_user_schema.dump(product)
+    return jsonify({"data":result.data,
+                    "code": 200})
+
+# posting new entry
+@app.route('/api/addUser', methods=['POST'])
+@jwt_required
+def add_user():
+    name = request.json['name']
+    email = request.json['email']
+    password = generate_password_hash(request.json['password'], method='sha256')
+    roles = request.json['roles']
+
+    new_user = Users(name, email, password, roles)
+
+    db.session.add(new_user)
+    db.session.commit()
+
+    result = test_user_schema.dump(new_user)
+    return jsonify({"data":result.data,
+                    "code": 200})
+
+# Delete product
+@app.route('/api/list/<id>', methods=['DELETE'])
+@jwt_required
+def delete_user(id):
+    try:
+        user = Users.query.get(id)
+        db.session.delete(user)
+        db.session.commit()
+        
+        feedback = test_user_schema.dump(user)
+        # return user_schema.jsonify(product)
+        return jsonify({"data":feedback.data,
+                        "code": 200})
+    except Exception as e:
+        return jsonify({'error' : "there is an error"})
+        # str(e)
+        
+# update a product
+@app.route('/api/list/<id>', methods=['PUT'])
+@jwt_required
+def update_user(id):
+
+    try:
+        user = Users.query.get(id)
+
+        name = request.json['name']
+        email = request.json['email']
+        password = generate_password_hash(request.json['password'], method='sha256')
+        roles = request.json['roles']
+
+        user.name = name
+        user.email = email
+        user.password = password
+        user.roles = roles
+
+        db.session.commit()
+
+        feedback = test_user_schema.dump(user)
+        # return product_schema.jsonify(user)
+        return jsonify({"data": feedback.data,
+                        "code": 200})
+    except Exception as e:
+        return jsonify({'error' : str(e),
+                        "code": 4000})
+        # str(e)
+    
+
 # @app.route('/', methods=['GET'])
 # def get():
 #     return jsonify({ 'msg': 'Hello world'})
